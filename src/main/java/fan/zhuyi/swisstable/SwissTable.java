@@ -9,9 +9,7 @@ import java.util.*;
 import jdk.incubator.vector.Vector;
 import jdk.incubator.vector.VectorMask;
 import jdk.incubator.vector.VectorSpecies;
-import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
 import static jdk.incubator.vector.ByteVector.SPECIES_128;
 import static jdk.incubator.vector.VectorOperators.*;

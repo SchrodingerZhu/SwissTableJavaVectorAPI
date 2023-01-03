@@ -5,7 +5,6 @@ import fan.zhuyi.swisstable.SwissTable;
 import fan.zhuyi.swisstable.WyHash;
 import org.junit.jupiter.api.Test;
 
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Random;
 
