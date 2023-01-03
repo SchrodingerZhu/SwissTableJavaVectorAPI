@@ -403,6 +403,10 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
         return Optional.empty();
     }
 
+    public boolean containsKey(K key){
+        return findWithHash(hasher.hash(key), key) >= 0;
+    }
+
     public class Entry {
         private final K key;
         private int index;

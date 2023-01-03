@@ -66,10 +66,33 @@ public class SwissTableTest {
         SwissTable<Integer, Integer> table = new SwissTable<>(WyHash.DEFAULT.asIntegerHasher());
         HashMap<Integer, Integer> hashMap = new HashMap<>();
         for (int i = 0; i < 10000; ++i) {
+            var y = gen.nextInt();
+            table.insert(i, y);
+            hashMap.put(i, y);
+        }
+        for (int i = 0; i < 10000; ++i) {
             var x = gen.nextInt();
+            while (hashMap.containsKey(x)) {
+                x = gen.nextInt();
+            }
             var y = gen.nextInt();
             table.insert(x, y);
             hashMap.put(x, y);
+        }
+        for (var i : hashMap.entrySet()) {
+            var element = table.find(i.getKey());
+            assertTrue(element.isPresent());
+            assertEquals(element.get(), i.getValue());
+        }
+        for (var i : table) {
+            assertTrue(i.isOccupied());
+            assertEquals(hashMap.get(i.key()), i.value());
+        }
+        for (int i = 0; i < 20000; ++i) {
+            var x = gen.nextInt() % 15000;
+            table.erase(x);
+            hashMap.remove(x);
+            assertFalse(table.containsKey(x));
         }
         for (var i : hashMap.entrySet()) {
             var element = table.find(i.getKey());
