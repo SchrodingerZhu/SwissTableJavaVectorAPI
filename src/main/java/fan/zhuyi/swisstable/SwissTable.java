@@ -418,13 +418,11 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
             return key;
         }
 
-        private static final NoSuchElementException EMPTY_SLOT = new NoSuchElementException("The entry is empty");
-
         public V value() throws NoSuchElementException {
             if (index >= 0) {
                 return (V) values[index];
             }
-            throw EMPTY_SLOT;
+            throw new NoSuchElementException("The entry is empty");
         }
 
         public boolean isOccupied() {
@@ -463,7 +461,7 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
                 keys[index] = null;
                 return (V) res;
             }
-            throw EMPTY_SLOT;
+            throw new NoSuchElementException("The entry is empty");
         }
     }
 
@@ -496,7 +494,6 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
             return remainingItems != 0;
         }
 
-        private static final NoSuchElementException EXHAUSTED_TABLE = new NoSuchElementException("Current Iterator has exhausted all elements in the table");
 
         @Override
         public @NotNull Entry next() {
@@ -505,7 +502,7 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
                 remainingItems -= 1;
                 return new Entry((K) keys[index], index);
             }
-            throw EXHAUSTED_TABLE;
+            throw new NoSuchElementException("Current Iterator has exhausted all elements in the table");
         }
     }
 }
