@@ -1,5 +1,7 @@
-package fan.zhuyi.swisstable;
+package fan.zhuyi.swisstable.test;
 
+import fan.zhuyi.swisstable.SwissTable;
+import fan.zhuyi.swisstable.WyHash;
 import org.junit.jupiter.api.Test;
 
 
