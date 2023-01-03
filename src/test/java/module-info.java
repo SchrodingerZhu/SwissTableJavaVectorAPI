@@ -3,4 +3,6 @@ module fan.zhuyi.swisstable.test {
     requires jdk.incubator.vector;
     requires org.junit.jupiter.api;
     requires fan.zhuyi.swisstable;
+
+    exports fan.zhuyi.swisstable.test;
 }
