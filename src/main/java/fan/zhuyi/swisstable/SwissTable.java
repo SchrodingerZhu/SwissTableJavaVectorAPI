@@ -4,20 +4,20 @@ import java.io.Serial;
 import java.io.Serializable;
 import java.lang.foreign.MemorySegment;
 import java.nio.ByteOrder;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Optional;
+import java.util.*;
 
 import jdk.incubator.vector.Vector;
 import jdk.incubator.vector.VectorMask;
 import jdk.incubator.vector.VectorSpecies;
+import org.jetbrains.annotations.Contract;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import static jdk.incubator.vector.ByteVector.SPECIES_128;
 import static jdk.incubator.vector.VectorOperators.*;
 
 @SuppressWarnings("unchecked")
-public class SwissTable<K, V> implements Serializable {
+public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>.Entry> {
     @Serial
     private static final long serialVersionUID = -7757782847622544171L;
 
@@ -82,10 +82,20 @@ public class SwissTable<K, V> implements Serializable {
         return load(offset).compare(LT, 0);
     }
 
+    private VectorMask<Byte> matchFull(int offset) {
+        return load(offset).compare(GE, 0);
+    }
+
     private void convertSpecialToEmptyAndFullToDeleted(int offset) {
         var maskedVector = load(offset).compare(LT, 0).toVector();
         var converted = maskedVector.lanewise(OR, (byte) 0x80);
         converted.intoMemorySegment(MemorySegment.ofArray(control), offset, ByteOrder.nativeOrder());
+    }
+
+    @NotNull
+    @Override
+    public Iterator<Entry> iterator() {
+        return new TableIterator();
     }
 
     private static class Slot {
@@ -183,6 +193,7 @@ public class SwissTable<K, V> implements Serializable {
     }
 
     private final ProbeSequence REUSE = new ProbeSequence(0, 0);
+
     private ProbeSequence probeSequence(long hash) {
         REUSE.position = Util.h1(hash) & bucketMask;
         REUSE.stride = 0;
@@ -323,7 +334,7 @@ public class SwissTable<K, V> implements Serializable {
         resize(newCapacity);
     }
 
-    private Optional<Integer> findWithHash(long hash, K key) {
+    private int findWithHash(long hash, K key) {
         byte h2 = Util.h2(hash);
         ProbeSequence seq = probeSequence(hash);
         while (true) {
@@ -332,11 +343,11 @@ public class SwissTable<K, V> implements Serializable {
             while (mask.hasNext()) {
                 var bit = mask.next();
                 var index = (position + bit) & bucketMask;
-                if (key.equals(keys[index])) return Optional.of(index);
+                if (key.equals(keys[index])) return index;
             }
 
             if (matchEmpty(position).anyTrue()) {
-                return Optional.empty();
+                return -1;
             }
         }
     }
@@ -369,19 +380,20 @@ public class SwissTable<K, V> implements Serializable {
     public Optional<V> find(K key) {
         var hash = hasher.hash(key);
         var index = findWithHash(hash, key);
-        return index.map(x -> (V) values[x]);
+        if (index >= 0) return Optional.of((V) values[index]);
+        return Optional.empty();
     }
 
     public Entry findEntry(K key) {
         var hash = hasher.hash(key);
         var index = findWithHash(hash, key);
-        return new Entry(key, index.orElse(null));
+        return new Entry(key, index);
     }
 
     public V findOrInsert(K key, V value) {
         var hash = hasher.hash(key);
         var index = findWithHash(hash, key);
-        if (index.isPresent()) return (V) values[index.get()];
+        if (index >= 0) return (V) values[index];
         var slot = findInsertSlot(hash);
         insertAt(slot, hash, key, value);
         return (V) values[slot];
@@ -389,14 +401,15 @@ public class SwissTable<K, V> implements Serializable {
 
     public Optional<V> erase(K key) {
         var entry = findEntry(key);
-        return entry.erase();
+        if (entry.isOccupied()) return Optional.of(entry.erase());
+        return Optional.empty();
     }
 
     public class Entry {
         private final K key;
-        private final @Nullable Integer index;
+        private int index;
 
-        private Entry(K key, @Nullable Integer index) {
+        private Entry(K key, int index) {
             this.key = key;
             this.index = index;
         }
@@ -405,24 +418,32 @@ public class SwissTable<K, V> implements Serializable {
             return key;
         }
 
-        public Optional<V> value() {
-            return index == null ? Optional.empty() : Optional.of((V) values[index]);
+        private static final NoSuchElementException EMPTY_SLOT = new NoSuchElementException("The entry is empty");
+
+        public V value() throws NoSuchElementException {
+            if (index >= 0) {
+                return (V) values[index];
+            }
+            throw EMPTY_SLOT;
         }
 
         public boolean isOccupied() {
-            return index != null;
+            return index >= 0;
         }
 
         public void set(V value) {
-            if (index != null) {
+            if (index >= 0) {
                 values[index] = value;
             } else {
-                insert(key, value);
+                var hash = hasher.hash(key);
+                var index = findInsertSlot(hash);
+                insertAt(index, hash, key, value);
+                this.index = index;
             }
         }
 
-        public Optional<V> erase() {
-            if (index != null) {
+        public V erase() throws NoSuchElementException {
+            if (index >= 0) {
                 var indexBefore = (index - vectorLength) & bucketMask;
                 var emptyBefore = matchEmpty(indexBefore);
                 var emptyAfter = matchEmpty(index);
@@ -440,9 +461,49 @@ public class SwissTable<K, V> implements Serializable {
                 var res = values[index];
                 values[index] = null;
                 keys[index] = null;
-                return Optional.of((V) res);
+                return (V) res;
             }
-            return Optional.empty();
+            throw EMPTY_SLOT;
+        }
+    }
+
+    public final class TableIterator implements Iterator<Entry> {
+
+        MaskIterator currentIterator;
+        int offset;
+
+        int remainingItems;
+
+        private TableIterator() {
+            this.currentIterator = new MaskIterator(matchFull(0));
+            this.offset = 0;
+            this.remainingItems = items;
+        }
+
+        private int moveNextUnchecked() {
+            while (true) {
+                if (currentIterator.hasNext()) {
+                    return offset + currentIterator.next();
+                }
+                var nextOffset = offset + vectorLength;
+                currentIterator.data = matchFull(offset).toLong();
+                offset = nextOffset;
+            }
+        }
+
+        @Override
+        public boolean hasNext() {
+            return remainingItems != 0;
+        }
+
+        @Override
+        public @NotNull Entry next() {
+            if (hasNext()) {
+                var index = moveNextUnchecked();
+                remainingItems -= 1;
+                return new Entry((K) keys[index], index);
+            }
+            throw new NoSuchElementException("Current Iterator has exhausted all elements in the table");
         }
     }
 }

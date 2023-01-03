@@ -6,6 +6,7 @@ import fan.zhuyi.swisstable.WyHash;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.Random;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -19,8 +20,8 @@ public class SwissTableTest {
         }
         for (int i = 0; i < firstRound; ++i) {
             var entry = table.findEntry(i);
-            assertTrue(entry.value().isPresent());
-            assertEquals(entry.value().get(), i);
+            assertTrue(entry.isOccupied());
+            assertEquals(entry.value(), i);
         }
         for (int i = 0; i < firstRound; ++i) {
             var value = table.erase(i);
@@ -40,8 +41,8 @@ public class SwissTableTest {
         }
         for (int i = 0; i <= secondRound; ++i) {
             var entry = table.findEntry(i);
-            assertTrue(entry.value().isPresent());
-            assertEquals(entry.value().get(), i);
+            assertTrue(entry.isOccupied());
+            assertEquals(entry.value(), i);
         }
     }
 
@@ -58,5 +59,24 @@ public class SwissTableTest {
     @Test
     public void badHashDist() {
         testSequential(ignored -> 0, 1000, 2000);
+    }
+
+    @Test
+    public void mutableIteratorTest() {
+        SwissTable<Integer, Integer> table = new SwissTable<>(WyHash.DEFAULT.asIntegerHasher());
+        HashMap<Integer, Integer> hashMap = new HashMap<>();
+        for (int i = 0; i < 10000; ++i) {
+            table.insert(i, i + 1);
+            hashMap.put(i, i + 1);
+        }
+        for (var i : hashMap.entrySet()) {
+            var element = table.find(i.getKey());
+            assertTrue(element.isPresent());
+            assertEquals(element.get(), i.getValue());
+        }
+        for (var i : table) {
+            assertTrue(i.isOccupied());
+            assertEquals(hashMap.get(i.key()), i.value());
+        }
     }
 }
