@@ -181,8 +181,11 @@ public class SwissTable<K, V> implements Serializable {
         control[index] = value;
     }
 
+    private final ProbeSequence REUSE = new ProbeSequence(0, 0);
     private ProbeSequence probeSequence(long hash) {
-        return new ProbeSequence(Util.h1(hash) & bucketMask, 0);
+        REUSE.position = Util.h1(hash) & bucketMask;
+        REUSE.stride = 0;
+        return REUSE;
     }
 
     private int properInsertionSlot(int index) {
