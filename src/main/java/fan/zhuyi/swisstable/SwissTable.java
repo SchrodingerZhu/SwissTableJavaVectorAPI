@@ -16,7 +16,7 @@ import static jdk.incubator.vector.ByteVector.SPECIES_128;
 import static jdk.incubator.vector.VectorOperators.*;
 
 @SuppressWarnings("unchecked")
-public class SwissTable<K, V, Vec extends VectorSpecies<Byte>> implements Serializable {
+public class SwissTable<K, V> implements Serializable {
     @Serial
     private static final long serialVersionUID = -7757782847622544171L;
 
@@ -272,8 +272,8 @@ public class SwissTable<K, V, Vec extends VectorSpecies<Byte>> implements Serial
         growthLeft = Util.bucketMaskToCapacity(bucketMask) - items;
     }
 
-    private SwissTable<K, V, Vec> prepareResize(int capacity) {
-        SwissTable<K, V, Vec> newTable = new SwissTable<>(vectorSpecies, hasher, capacity);
+    private SwissTable<K, V> prepareResize(int capacity) {
+        SwissTable<K, V> newTable = new SwissTable<>(vectorSpecies, hasher, capacity);
         newTable.growthLeft -= items;
         newTable.items += items;
         return newTable;
