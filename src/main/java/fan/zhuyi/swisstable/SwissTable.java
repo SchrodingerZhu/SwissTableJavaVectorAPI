@@ -1,15 +1,18 @@
 package fan.zhuyi.swisstable;
 
-import java.io.Serial;
-import java.io.Serializable;
-import java.lang.foreign.MemorySegment;
-import java.nio.ByteOrder;
-import java.util.*;
-
 import jdk.incubator.vector.Vector;
 import jdk.incubator.vector.VectorMask;
 import jdk.incubator.vector.VectorSpecies;
 import org.jetbrains.annotations.NotNull;
+
+import java.io.Serial;
+import java.io.Serializable;
+import java.lang.foreign.MemorySegment;
+import java.nio.ByteOrder;
+import java.util.Arrays;
+import java.util.Iterator;
+import java.util.NoSuchElementException;
+import java.util.Optional;
 
 import static jdk.incubator.vector.ByteVector.SPECIES_128;
 import static jdk.incubator.vector.VectorOperators.*;
@@ -24,15 +27,14 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
 
     private final VectorSpecies<Byte> vectorSpecies;
     private final int vectorLength;
-
+    private final Hasher<K> hasher;
+    private final ProbeSequence REUSE = new ProbeSequence(0, 0);
     private byte[] control;
     private Object[] keys;
     private Object[] values;
     private int bucketMask;
     private int items;
     private int growthLeft;
-
-    private final Hasher<K> hasher;
 
     public SwissTable(VectorSpecies<Byte> vectorSpecies, Hasher<K> hasher) {
         this(vectorSpecies, hasher, 0);
@@ -96,88 +98,6 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
         return new TableIterator();
     }
 
-    private static class Slot {
-        int index;
-        byte prevControl;
-
-        Slot(int index, byte prevControl) {
-            this.index = index;
-            this.prevControl = prevControl;
-        }
-    }
-
-    private static class Util {
-        public static boolean isFull(byte control) {
-            return (control & 0x80) == 0;
-        }
-
-        public static boolean specialIsEmpty(byte control) {
-            return (control & 0x10) != 0;
-        }
-
-        public static int h1(long hash) {
-            return (int) hash;
-        }
-
-        public static byte h2(long hash) {
-            return (byte) ((hash >>> (Long.SIZE - 7)) & 0x7f);
-        }
-
-        private static int nextPowerOfTwo(int value) {
-            var idx = Long.numberOfLeadingZeros(value - 1);
-            return 0x1 << (Integer.SIZE - idx);
-        }
-
-        private static int capacityToBuckets(int capacity) {
-            if (capacity < 8) return (capacity < 4) ? 4 : 8;
-            return nextPowerOfTwo(capacity * 8);
-        }
-
-        private static int bucketMaskToCapacity(int bucketMask) {
-            if (bucketMask < 8) {
-                return bucketMask;
-            } else {
-                return (bucketMask + 1) / 8 * 7;
-            }
-        }
-    }
-
-    private class ProbeSequence {
-        int position;
-        int stride;
-
-        public ProbeSequence(int position, int stride) {
-            this.position = position;
-            this.stride = stride;
-        }
-
-        public int moveNext() {
-            var position = this.position;
-            stride += vectorSpecies.length();
-            position += stride;
-            position &= bucketMask;
-            return position;
-        }
-    }
-
-    private static class MaskIterator {
-        long data;
-
-        public MaskIterator(VectorMask<Byte> mask) {
-            this.data = mask.toLong();
-        }
-
-        public boolean hasNext() {
-            return data != 0;
-        }
-
-        public int next() {
-            var result = Long.numberOfTrailingZeros(data);
-            data = data & (data - 1);
-            return result;
-        }
-    }
-
     private int numOfBuckets() {
         return bucketMask + 1;
     }
@@ -189,8 +109,6 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
         }
         control[index] = value;
     }
-
-    private final ProbeSequence REUSE = new ProbeSequence(0, 0);
 
     private ProbeSequence probeSequence(long hash) {
         REUSE.position = Util.h1(hash) & bucketMask;
@@ -247,7 +165,7 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
         return x == y;
     }
 
-    private void rehashInPlace(Hasher<K> hasher) {
+    private void rehashInPlace() {
         prepareRehashInPlace();
         for (int idx = 0; idx < numOfBuckets(); ++idx) {
             if (control[idx] != DELETED_BYTE) {
@@ -325,7 +243,7 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
         var newItems = items + additional;
         var fullCapacity = Util.bucketMaskToCapacity(bucketMask);
         if (newItems <= fullCapacity / 2) {
-            rehashInPlace(hasher);
+            rehashInPlace();
             return;
         }
         var newCapacity = Math.max(newItems, fullCapacity + 1);
@@ -403,12 +321,114 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
         return Optional.empty();
     }
 
-    public boolean containsKey(K key){
+    public boolean containsKey(K key) {
         return findWithHash(hasher.hash(key), key) >= 0;
     }
 
     public void reserve(int additional) {
         reserveWithRehash(additional);
+    }
+
+    public int capacity() {
+        return items + growthLeft;
+    }
+
+    public int growthLeft() {
+        return growthLeft;
+    }
+
+    public int size() {
+        return items;
+    }
+
+    public boolean isEmpty() {
+        return items == 0;
+    }
+
+    public void rehash() {
+        rehashInPlace();
+    }
+
+    private static class Slot {
+        int index;
+        byte prevControl;
+
+        Slot(int index, byte prevControl) {
+            this.index = index;
+            this.prevControl = prevControl;
+        }
+    }
+
+    private static class Util {
+        public static boolean isFull(byte control) {
+            return (control & 0x80) == 0;
+        }
+
+        public static boolean specialIsEmpty(byte control) {
+            return (control & 0x10) != 0;
+        }
+
+        public static int h1(long hash) {
+            return (int) hash;
+        }
+
+        public static byte h2(long hash) {
+            return (byte) ((hash >>> (Long.SIZE - 7)) & 0x7f);
+        }
+
+        private static int nextPowerOfTwo(int value) {
+            var idx = Long.numberOfLeadingZeros(value - 1);
+            return 0x1 << (Integer.SIZE - idx);
+        }
+
+        private static int capacityToBuckets(int capacity) {
+            if (capacity < 8) return (capacity < 4) ? 4 : 8;
+            return nextPowerOfTwo(capacity * 8);
+        }
+
+        private static int bucketMaskToCapacity(int bucketMask) {
+            if (bucketMask < 8) {
+                return bucketMask;
+            } else {
+                return (bucketMask + 1) / 8 * 7;
+            }
+        }
+    }
+
+    private static class MaskIterator {
+        long data;
+
+        public MaskIterator(VectorMask<Byte> mask) {
+            this.data = mask.toLong();
+        }
+
+        public boolean hasNext() {
+            return data != 0;
+        }
+
+        public int next() {
+            var result = Long.numberOfTrailingZeros(data);
+            data = data & (data - 1);
+            return result;
+        }
+    }
+
+    private class ProbeSequence {
+        int position;
+        int stride;
+
+        public ProbeSequence(int position, int stride) {
+            this.position = position;
+            this.stride = stride;
+        }
+
+        public int moveNext() {
+            var position = this.position;
+            stride += vectorSpecies.length();
+            position += stride;
+            position &= bucketMask;
+            return position;
+        }
     }
 
     public class Entry {
