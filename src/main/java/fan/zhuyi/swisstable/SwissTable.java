@@ -496,6 +496,8 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
             return remainingItems != 0;
         }
 
+        private static final NoSuchElementException EXHAUSTED_TABLE = new NoSuchElementException("Current Iterator has exhausted all elements in the table");
+
         @Override
         public @NotNull Entry next() {
             if (hasNext()) {
@@ -503,7 +505,7 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
                 remainingItems -= 1;
                 return new Entry((K) keys[index], index);
             }
-            throw new NoSuchElementException("Current Iterator has exhausted all elements in the table");
+            throw EXHAUSTED_TABLE;
         }
     }
 }
