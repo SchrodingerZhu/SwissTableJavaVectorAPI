@@ -25,10 +25,6 @@ public class WyHash {
                 b = (wyr4(input, off + len - 4) << 32) | wyr4(input, off + len - 4 - ((len >>> 3) << 2));
             } else if (len > 0) {
                 a = wyr3(input, off, len);
-                b = 0;
-            } else {
-                a = 0;
-                b = 0;
             }
         } else {
             int i = len;
@@ -151,12 +147,7 @@ public class WyHash {
     public Hasher<Integer> asIntegerHasher() {
         var base = this;
         return key -> {
-            byte[] bytes = {
-                    (byte) key.intValue(),
-                    (byte) (key >>> 8),
-                    (byte) (key >>> 16),
-                    (byte) (key >>> 24),
-            };
+            byte[] bytes = {(byte) key.intValue(), (byte) (key >>> 8), (byte) (key >>> 16), (byte) (key >>> 24),};
             return base.hashBytesToLong(bytes, 0, 4);
         };
     }
@@ -164,16 +155,7 @@ public class WyHash {
     public Hasher<Long> asLongHasher() {
         var base = this;
         return key -> {
-            byte[] bytes = {
-                    (byte) key.intValue(),
-                    (byte) (key >>> 8),
-                    (byte) (key >>> 16),
-                    (byte) (key >>> 24),
-                    (byte) (key >>> 32),
-                    (byte) (key >>> 40),
-                    (byte) (key >>> 48),
-                    (byte) (key >>> 56),
-            };
+            byte[] bytes = {(byte) key.intValue(), (byte) (key >>> 8), (byte) (key >>> 16), (byte) (key >>> 24), (byte) (key >>> 32), (byte) (key >>> 40), (byte) (key >>> 48), (byte) (key >>> 56),};
             return base.hashBytesToLong(bytes, 0, 8);
         };
     }
