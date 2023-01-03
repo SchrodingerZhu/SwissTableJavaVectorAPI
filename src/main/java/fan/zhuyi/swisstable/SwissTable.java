@@ -174,12 +174,11 @@ public class SwissTable<K, V> implements Serializable {
     }
 
     private void setControl(int index, byte value) {
-        int mirrorIndex = index;
         if (index < vectorLength) {
-            mirrorIndex = bucketMask + 1 + index;
+            int mirrorIndex = bucketMask + 1 + index;
+            control[mirrorIndex] = value;
         }
         control[index] = value;
-        control[mirrorIndex] = value;
     }
 
     private ProbeSequence probeSequence(long hash) {
