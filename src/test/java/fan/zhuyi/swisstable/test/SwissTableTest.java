@@ -62,12 +62,15 @@ public class SwissTableTest {
     }
 
     @Test
-    public void mutableIteratorTest() {
+    public void mutualIteratorTest() {
+        var gen = new Random();
         SwissTable<Integer, Integer> table = new SwissTable<>(WyHash.DEFAULT.asIntegerHasher());
         HashMap<Integer, Integer> hashMap = new HashMap<>();
         for (int i = 0; i < 10000; ++i) {
-            table.insert(i, i + 1);
-            hashMap.put(i, i + 1);
+            var x = gen.nextInt();
+            var y = gen.nextInt();
+            table.insert(x, y);
+            hashMap.put(x, y);
         }
         for (var i : hashMap.entrySet()) {
             var element = table.find(i.getKey());

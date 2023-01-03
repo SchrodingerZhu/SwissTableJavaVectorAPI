@@ -498,7 +498,7 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
         @Override
         public @NotNull Entry next() {
             if (hasNext()) {
-                var index = moveNextUnchecked();
+                var index = moveNextUnchecked() & bucketMask;
                 remainingItems -= 1;
                 return new Entry((K) keys[index], index);
             }
