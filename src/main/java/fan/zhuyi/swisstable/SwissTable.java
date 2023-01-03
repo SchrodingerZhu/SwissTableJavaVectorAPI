@@ -4,6 +4,7 @@ import java.io.Serial;
 import java.io.Serializable;
 import java.lang.foreign.MemorySegment;
 import java.nio.ByteOrder;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Optional;
 
@@ -27,8 +28,8 @@ public class SwissTable<K, V> implements Serializable {
     private final int vectorLength;
 
     private byte[] control;
-    private transient Object[] keys;
-    private transient Object[] values;
+    private Object[] keys;
+    private Object[] values;
     private int bucketMask;
     private int items;
     private int growthLeft;
