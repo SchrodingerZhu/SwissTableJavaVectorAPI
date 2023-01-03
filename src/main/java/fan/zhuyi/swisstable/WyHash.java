@@ -1,8 +1,6 @@
 package fan.zhuyi.swisstable;
 
 import static java.lang.Math.unsignedMultiplyHigh;
-import static java.lang.reflect.Array.getInt;
-import static java.lang.reflect.Array.getLong;
 
 /**
  * Modified from <a href="https://github.com/dynatrace-oss/hash4j">hash4j</a>
@@ -10,26 +8,22 @@ import static java.lang.reflect.Array.getLong;
 
 public class WyHash implements Hasher<String> {
     private final long seed;
-    private final long secret1;
-    private final long secret2;
-    private final long secret3;
+    private final long[] secret;
 
-    private WyHash(long seed, long secret1, long secret2, long secret3) {
+    private WyHash(long seed, long[] secret) {
         this.seed = seed;
-        this.secret1 = secret1;
-        this.secret2 = secret2;
-        this.secret3 = secret3;
+        this.secret = secret;
     }
 
     public long hashBytesToLong(byte[] input, int off, int len) {
-        var seed = wymix(this.seed ^ secret1, len ^ secret2);
-        long see0 = seed;
-        long a;
-        long b;
+        var seed = this.seed ^ wymix(this.seed ^ secret[0], secret[1]);
+        long a = 0;
+        long b = 0;
         if (len <= 16) {
             if (len >= 4) {
-                a = (wyr4(input, off) << 32) | wyr4(input, off + ((len >>> 3) << 2));
-                b = (wyr4(input, off + len - 4) << 32) | wyr4(input, (off + len - 4) - ((len >>> 3) << 2));
+                a = (wyr4(input, off) << 32) | wyr4(input, off + ((len >> 3) << 2));
+                b = (wyr4(input, off + len - 4) << 32) |
+                        wyr4(input, off + len - 4 - ((len >>> 3) << 2));
             } else if (len > 0) {
                 a = wyr3(input, off, len);
                 b = 0;
@@ -40,29 +34,31 @@ public class WyHash implements Hasher<String> {
         } else {
             int i = len;
             int p = off;
-            long see1 = seed;
-            long see2 = seed;
-            while (i > 48) {
-                see0 = wymix(getLong(input, p) ^ secret1, getLong(input, p + 8) ^ see0);
-                see1 = wymix(getLong(input, p + 16) ^ secret2, getLong(input, p + 24) ^ see1);
-                see2 = wymix(getLong(input, p + 32) ^ secret3, getLong(input, p + 40) ^ see2);
-                p += 48;
-                i -= 48;
+            if (i > 48) {
+                long s1 = seed;
+                long s2 = seed;
+                do {
+                    seed = wymix(wyr8(input, p) ^ secret[1], wyr8(input, p + 8) ^ seed);
+                    s1 = wymix(wyr8(input, p + 16) ^ secret[2], wyr8(input, p + 24) ^ s1);
+                    s2 = wymix(wyr8(input, p + 32) ^ secret[3], wyr8(input, p + 40) ^ s2);
+                    p += 48;
+                    i -= 48;
+                } while (i > 48);
+                seed ^= s1 ^ s2;
             }
-            see0 ^= see1 ^ see2;
             while (i > 16) {
-                see0 = wymix(getLong(input, p) ^ secret1, getLong(input, p + 8) ^ see0);
+                seed = wymix(wyr8(input, p) ^ secret[1], wyr8(input, p + 8) ^ seed);
                 i -= 16;
                 p += 16;
             }
-            a = getLong(input, p + i - 16);
-            b = getLong(input, p + i - 8);
+            a = wyr8(input, p + i - 16);
+            b = wyr8(input, p + i - 8);
         }
-        a ^= secret2;
+        a ^= secret[1];
         b ^= seed;
         var x = a * b;
         var y = unsignedMultiplyHigh(a, b);
-        return wymix(x ^ secret1 ^ len, y ^ secret2);
+        return wymix(x ^ secret[0] ^ len, y ^ secret[1]);
     }
 
     private static long wymix(long a, long b) {
@@ -72,37 +68,39 @@ public class WyHash implements Hasher<String> {
     }
 
     private static long wyr3(byte[] data, int off, int k) {
-        return ((data[off] & 0xFFL) << 16) | ((data[off + (k >>> 1)] & 0xFFL) << 8) | (data[off + k - 1] & 0xFFL);
+        var a = ((long) data[off]) << 16;
+        var b = ((long) data[off + k / 2]) << 8;
+        var c = ((long) data[off + k - 1]);
+        return a | b | c;
+    }
+
+    private static long read(byte[] data, int p, int size) {
+        long value = 0;
+        for (int i = 0; i < size; ++i) {
+            value |= ((long) data[p + i]) << (i * 8);
+        }
+        return value;
     }
 
     private static long wyr4(byte[] data, int p) {
-        return getInt(data, p) & 0xFFFFFFFFL;
+        return read(data, p, 4);
+    }
+
+    private static long wyr8(byte[] data, int p) {
+        return read(data, p, 8);
     }
 
     public static WyHash create(long seedForHash) {
-        long[] secret = DEFAULT_SECRET;
-        long seed = seedForHash ^ secret[0];
-        long secret1 = secret[1];
-        long secret2 = secret[2];
-        long secret3 = secret[3];
-        return new WyHash(seed, secret1, secret2, secret3);
+        return new WyHash(seedForHash, DEFAULT_SECRET);
     }
 
     public static WyHash create(long seedForHash, long seedForInitialize) {
         long[] secret = makeSecret(seedForInitialize);
-        long seed = seedForHash ^ secret[0];
-        long secret1 = secret[1];
-        long secret2 = secret[2];
-        long secret3 = secret[3];
-        return new WyHash(seed, secret1, secret2, secret3);
+        return new WyHash(seedForHash, secret);
     }
 
-    public static WyHash create(long seedForHash, long[] secret) {
-        long seed = seedForHash ^ secret[0];
-        long secret1 = secret[1];
-        long secret2 = secret[2];
-        long secret3 = secret[3];
-        return new WyHash(seed, secret1, secret2, secret3);
+    public static WyHash create(long seed, long[] secret) {
+        return new WyHash(seed, secret);
     }
 
     private static final long[] DEFAULT_SECRET = {0xa0761d6478bd642fL, 0xe7037ed1a0b428dbL, 0x8ebc6af09c88c6e3L, 0x589965cc75374cc3L};
