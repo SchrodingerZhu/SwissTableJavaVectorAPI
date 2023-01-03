@@ -484,7 +484,7 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
                     return offset + currentIterator.next();
                 }
                 var nextOffset = offset + vectorLength;
-                currentIterator.data = matchFull(offset).toLong();
+                currentIterator.data = matchFull(nextOffset).toLong();
                 offset = nextOffset;
             }
         }
