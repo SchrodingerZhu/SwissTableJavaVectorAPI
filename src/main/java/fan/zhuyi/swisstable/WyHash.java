@@ -6,7 +6,7 @@ import static java.lang.Math.unsignedMultiplyHigh;
  * Modified from <a href="https://github.com/dynatrace-oss/hash4j">hash4j</a>
  */
 
-public class WyHash implements Hasher<String> {
+public class WyHash {
     private final long seed;
     private final long[] secret;
 
@@ -22,8 +22,7 @@ public class WyHash implements Hasher<String> {
         if (len <= 16) {
             if (len >= 4) {
                 a = (wyr4(input, off) << 32) | wyr4(input, off + ((len >> 3) << 2));
-                b = (wyr4(input, off + len - 4) << 32) |
-                        wyr4(input, off + len - 4 - ((len >>> 3) << 2));
+                b = (wyr4(input, off + len - 4) << 32) | wyr4(input, off + len - 4 - ((len >>> 3) << 2));
             } else if (len > 0) {
                 a = wyr3(input, off, len);
                 b = 0;
@@ -136,9 +135,46 @@ public class WyHash implements Hasher<String> {
 
     public static final WyHash DEFAULT = create(0L);
 
-    @Override
-    public long hash(String key) {
-        var bytes = key.getBytes();
-        return hashBytesToLong(bytes, 0, bytes.length);
+    public Hasher<String> asStringHasher() {
+        var base = this;
+        return key -> {
+            var bytes = key.getBytes();
+            return base.hashBytesToLong(bytes, 0, bytes.length);
+        };
+    }
+
+    public Hasher<byte[]> asByteArrayHasher() {
+        var base = this;
+        return bytes -> base.hashBytesToLong(bytes, 0, bytes.length);
+    }
+
+    public Hasher<Integer> asIntegerHasher() {
+        var base = this;
+        return key -> {
+            byte[] bytes = {
+                    (byte) key.intValue(),
+                    (byte) (key >>> 8),
+                    (byte) (key >>> 16),
+                    (byte) (key >>> 24),
+            };
+            return base.hashBytesToLong(bytes, 0, 4);
+        };
+    }
+
+    public Hasher<Long> asLongHasher() {
+        var base = this;
+        return key -> {
+            byte[] bytes = {
+                    (byte) key.intValue(),
+                    (byte) (key >>> 8),
+                    (byte) (key >>> 16),
+                    (byte) (key >>> 24),
+                    (byte) (key >>> 32),
+                    (byte) (key >>> 40),
+                    (byte) (key >>> 48),
+                    (byte) (key >>> 56),
+            };
+            return base.hashBytesToLong(bytes, 0, 8);
+        };
     }
 }
