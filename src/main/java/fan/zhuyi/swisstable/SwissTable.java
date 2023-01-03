@@ -321,8 +321,8 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
         this.growthLeft = newTable.growthLeft;
     }
 
-    private void reserveWithRehash() {
-        var newItems = items + 1;
+    private void reserveWithRehash(int additional) {
+        var newItems = items + additional;
         var fullCapacity = Util.bucketMaskToCapacity(bucketMask);
         if (newItems <= fullCapacity / 2) {
             rehashInPlace(hasher);
@@ -360,7 +360,7 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
         var prevControl = control[index];
 
         if (growthLeft == 0 && Util.specialIsEmpty(prevControl)) {
-            reserveWithRehash();
+            reserveWithRehash(1);
             index = findInsertSlot(hash);
         }
 
@@ -405,6 +405,10 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
 
     public boolean containsKey(K key){
         return findWithHash(hasher.hash(key), key) >= 0;
+    }
+
+    public void reserve(int additional) {
+        reserveWithRehash(additional);
     }
 
     public class Entry {
