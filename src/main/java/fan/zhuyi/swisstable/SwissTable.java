@@ -83,7 +83,7 @@ public class SwissTable<K, V> implements Serializable {
 
     private void convertSpecialToEmptyAndFullToDeleted(int offset) {
         var maskedVector = load(offset).compare(LT, 0).toVector();
-        var converted = maskedVector.lanewise(OR, 0x80);
+        var converted = maskedVector.lanewise(OR, (byte) 0x80);
         converted.intoMemorySegment(MemorySegment.ofArray(control), offset, ByteOrder.nativeOrder());
     }
 
