@@ -1,0 +1,436 @@
+package fan.zhuyi.swisstable;
+
+import java.io.Serial;
+import java.io.Serializable;
+import java.lang.foreign.MemorySegment;
+import java.nio.ByteOrder;
+import java.util.Arrays;
+import java.util.Optional;
+
+import jdk.incubator.vector.Vector;
+import jdk.incubator.vector.VectorMask;
+import jdk.incubator.vector.VectorSpecies;
+import org.jetbrains.annotations.Nullable;
+
+import static jdk.incubator.vector.VectorOperators.*;
+
+@SuppressWarnings("unchecked")
+public class SwissTable<K, V, Vec extends VectorSpecies<Byte>> implements Serializable {
+    @Serial
+    private static final long serialVersionUID = -7757782847622544171L;
+
+    private static final byte EMPTY_BYTE = (byte) 0b11111111;
+    private static final byte DELETED_BYTE = (byte) 0b10000000;
+
+    private final VectorSpecies<Byte> vectorSpecies;
+    private final int vectorLength;
+
+    private byte[] control;
+    private transient Object[] keys;
+    private transient Object[] values;
+    private int bucketMask;
+    private int items;
+    private int growthLeft;
+
+    private final Hasher<K> hasher;
+
+    public SwissTable(VectorSpecies<Byte> vectorSpecies, int capacity, Hasher<K> hasher) {
+        this.vectorSpecies = vectorSpecies;
+        if (capacity == 0) {
+            this.control = new byte[vectorSpecies.length()];
+            this.keys = null;
+            this.values = null;
+            this.bucketMask = 0;
+            this.growthLeft = 0;
+        } else {
+            var buckets = Util.capacityToBuckets(capacity);
+            this.control = new byte[vectorSpecies.length() + buckets];
+            this.keys = new Object[buckets];
+            this.values = new Object[buckets];
+            this.bucketMask = buckets - 1;
+            this.growthLeft = Util.bucketMaskToCapacity(this.bucketMask);
+        }
+        this.vectorLength = this.vectorSpecies.length();
+        this.items = 0;
+        this.hasher = hasher;
+        Arrays.fill(this.control, EMPTY_BYTE);
+    }
+
+    private Vector<Byte> load(int offset) {
+        return vectorSpecies.fromArray(control, offset);
+    }
+
+    private VectorMask<Byte> matchByte(int offset, byte target) {
+        return load(offset).compare(EQ, target);
+    }
+
+    private VectorMask<Byte> matchEmpty(int offset) {
+        return load(offset).compare(EQ, EMPTY_BYTE);
+    }
+
+    private VectorMask<Byte> matchEmptyOrDeleted(int offset) {
+        return load(offset).compare(LT, 0);
+    }
+
+    private void convertSpecialToEmptyAndFullToDeleted(int offset) {
+        var maskedVector = load(offset).compare(LT, 0).toVector();
+        var converted = maskedVector.lanewise(OR, 0x80);
+        converted.intoMemorySegment(MemorySegment.ofArray(control), offset, ByteOrder.nativeOrder());
+    }
+
+    private static class Slot {
+        int index;
+        byte prevControl;
+
+        Slot(int index, byte prevControl) {
+            this.index = index;
+            this.prevControl = prevControl;
+        }
+    }
+
+    private static class Util {
+        public static boolean isFull(byte control) {
+            return (control & 0x80) == 0;
+        }
+
+        public static boolean specialIsEmpty(byte control) {
+            return (control & 0x10) != 0;
+        }
+
+        public static int h1(long hash) {
+            return (int) hash;
+        }
+
+        public static byte h2(long hash) {
+            return (byte) ((hash >>> (Long.SIZE - 7)) & 0x7f);
+        }
+
+        private static int nextPowerOfTwo(int value) {
+            var idx = Long.numberOfLeadingZeros(value - 1);
+            return 0x1 << (Integer.SIZE - idx);
+        }
+
+        private static int capacityToBuckets(int capacity) {
+            if (capacity < 8) return (capacity < 4) ? 4 : 8;
+            return nextPowerOfTwo(capacity * 8);
+        }
+
+        private static int bucketMaskToCapacity(int bucketMask) {
+            if (bucketMask < 8) {
+                return bucketMask;
+            } else {
+                return (bucketMask + 1) / 8 * 7;
+            }
+        }
+    }
+
+    private class ProbeSequence {
+        int position;
+        int stride;
+
+        public ProbeSequence(int position, int stride) {
+            this.position = position;
+            this.stride = stride;
+        }
+
+        public int moveNext() {
+            var position = this.position;
+            stride += vectorSpecies.length();
+            position += stride;
+            position &= bucketMask;
+            return position;
+        }
+    }
+
+    private static class MaskIterator {
+        long data;
+
+        public MaskIterator(VectorMask<Byte> mask) {
+            this.data = mask.toLong();
+        }
+
+        public boolean hasNext() {
+            return data != 0;
+        }
+
+        public int next() {
+            var result = Long.numberOfTrailingZeros(data);
+            data = data & (data - 1);
+            return result;
+        }
+    }
+
+    private int numOfBuckets() {
+        return bucketMask + 1;
+    }
+
+    private void setControl(int index, byte value) {
+        int mirrorIndex = index;
+        if (index < vectorLength) {
+            mirrorIndex = bucketMask + 1 + index;
+        }
+        control[index] = value;
+        control[mirrorIndex] = value;
+    }
+
+    private ProbeSequence probeSequence(long hash) {
+        return new ProbeSequence(Util.h1(hash) & bucketMask, 0);
+    }
+
+    private int properInsertionSlot(int index) {
+        if (Util.isFull(control[index])) return matchEmptyOrDeleted(0).firstTrue();
+        return index;
+    }
+
+    private int findInsertSlot(long hash) {
+        var seq = probeSequence(hash);
+        while (true) {
+            var position = seq.moveNext();
+            var mask = matchEmptyOrDeleted(position);
+            if (mask.anyTrue()) {
+                var candidate = (position + mask.firstTrue()) & bucketMask;
+                return properInsertionSlot(candidate);
+            }
+        }
+    }
+
+    private void setControlH2(int index, long hash) {
+        setControl(index, Util.h2(hash));
+    }
+
+    private byte replaceControlH2(int index, long hash) {
+        var prev = control[index];
+        setControlH2(index, hash);
+        return prev;
+    }
+
+    private void prepareRehashInPlace() {
+        for (int i = 0; i < numOfBuckets(); i += vectorLength) {
+            convertSpecialToEmptyAndFullToDeleted(i);
+        }
+        if (numOfBuckets() < vectorLength) {
+            for (int i = 0; i < numOfBuckets(); ++i) {
+                control[vectorLength + i] = control[i];
+            }
+        } else {
+            for (int i = 0; i < vectorLength; ++i) {
+                control[numOfBuckets() + i] = control[i];
+            }
+        }
+    }
+
+    private boolean isInTheSameGroup(int index, int new_index, long hash) {
+        var probe_position = Util.h1(hash) & bucketMask;
+        int x = ((index - probe_position) & bucketMask) / vectorLength;
+        int y = ((new_index - probe_position) & bucketMask) / vectorLength;
+        return x == y;
+    }
+
+    private void rehashInPlace(Hasher<K> hasher) {
+        prepareRehashInPlace();
+        for (int idx = 0; idx < numOfBuckets(); ++idx) {
+            if (control[idx] != DELETED_BYTE) {
+                continue;
+            }
+            while (true) {
+                var hash = hasher.hash((K) keys[idx]);
+                var new_idx = findInsertSlot(hash);
+                if (isInTheSameGroup(idx, new_idx, hash)) {
+                    setControlH2(idx, hash);
+                    break;
+                }
+                var prevControl = replaceControlH2(new_idx, hash);
+
+                if (prevControl == EMPTY_BYTE) {
+                    setControl(idx, EMPTY_BYTE);
+                    keys[idx] = null;
+                    values[idx] = null;
+                    keys[new_idx] = keys[idx];
+                    values[new_idx] = values[idx];
+                    break;
+                }
+
+                var tmpKey = keys[new_idx];
+                keys[new_idx] = keys[idx];
+                keys[idx] = tmpKey;
+
+                var tmpValue = values[new_idx];
+                values[new_idx] = values[idx];
+                values[idx] = tmpValue;
+            }
+        }
+
+        growthLeft = Util.bucketMaskToCapacity(bucketMask) - items;
+    }
+
+    private SwissTable<K, V, Vec> prepareResize(int capacity) {
+        SwissTable<K, V, Vec> newTable = new SwissTable<>(vectorSpecies, capacity, hasher);
+        newTable.growthLeft -= items;
+        newTable.items += items;
+        return newTable;
+    }
+
+    private boolean isBucketFull(int index) {
+        return Util.isFull(control[index]);
+    }
+
+    private Slot prepareInsertSlot(long hash) {
+        int index = findInsertSlot(hash);
+        byte prevControl = control[index];
+        setControlH2(index, hash);
+        return new Slot(index, prevControl);
+    }
+
+    private void resize(int newCapacity) {
+        var newTable = prepareResize(newCapacity);
+
+        for (int i = 0; i < numOfBuckets(); ++i) {
+            if (!isBucketFull(i)) continue;
+            var hash = hasher.hash((K) keys[i]);
+            var slot = newTable.prepareInsertSlot(hash);
+            newTable.keys[slot.index] = keys[i];
+            newTable.values[slot.index] = values[i];
+        }
+
+        this.keys = newTable.keys;
+        this.values = newTable.values;
+        this.control = newTable.control;
+        this.bucketMask = newTable.bucketMask;
+        this.items = newTable.items;
+        this.growthLeft = newTable.growthLeft;
+    }
+
+    private void reserveWithRehash() {
+        var newItems = items + 1;
+        var fullCapacity = Util.bucketMaskToCapacity(bucketMask);
+        if (newItems <= fullCapacity / 2) {
+            rehashInPlace(hasher);
+            return;
+        }
+        var newCapacity = Math.max(newItems, fullCapacity + 1);
+        resize(newCapacity);
+    }
+
+    private Optional<Integer> findWithHash(long hash, K key) {
+        byte h2 = Util.h2(hash);
+        ProbeSequence seq = probeSequence(hash);
+        while (true) {
+            var position = seq.moveNext();
+            var mask = new MaskIterator(matchByte(position, h2));
+            while (mask.hasNext()) {
+                var bit = mask.next();
+                var index = (position + bit) & bucketMask;
+                if (key.equals(keys[index])) return Optional.of(index);
+            }
+
+            if (matchEmpty(position).anyTrue()) {
+                return Optional.empty();
+            }
+        }
+    }
+
+    private void recordAt(int index, byte prevControl, long hash) {
+        growthLeft -= Util.specialIsEmpty(prevControl) ? 1 : 0;
+        setControlH2(index, hash);
+        items++;
+    }
+
+    private void insertAt(int index, long hash, K key, V value) {
+        var prevControl = control[index];
+
+        if (growthLeft == 0 && Util.specialIsEmpty(prevControl)) {
+            reserveWithRehash();
+            index = findInsertSlot(hash);
+        }
+
+        recordAt(index, prevControl, hash);
+        keys[index] = key;
+        values[index] = value;
+    }
+
+    public void insert(K key, V value) {
+        var hash = hasher.hash(key);
+        var index = findInsertSlot(hash);
+        insertAt(index, hash, key, value);
+    }
+
+    public Optional<V> find(K key) {
+        var hash = hasher.hash(key);
+        var index = findWithHash(hash, key);
+        return index.map(x -> (V) values[x]);
+    }
+
+    public Entry findEntry(K key) {
+        var hash = hasher.hash(key);
+        var index = findWithHash(hash, key);
+        return new Entry(key, index.orElse(null));
+    }
+
+    public V findOrInsert(K key, V value) {
+        var hash = hasher.hash(key);
+        var index = findWithHash(hash, key);
+        if (index.isPresent()) return (V) values[index.get()];
+        var slot = findInsertSlot(hash);
+        insertAt(slot, hash, key, value);
+        return (V) values[slot];
+    }
+
+    public Optional<V> erase(K key) {
+        var entry = findEntry(key);
+        return entry.erase();
+    }
+
+    public class Entry {
+        private final K key;
+        private final @Nullable Integer index;
+
+        private Entry(K key, @Nullable Integer index) {
+            this.key = key;
+            this.index = index;
+        }
+
+        public K key() {
+            return key;
+        }
+
+        public Optional<V> value() {
+            return index == null ? Optional.empty() : Optional.of((V) values[index]);
+        }
+
+        public boolean isOccupied() {
+            return index != null;
+        }
+
+        public void set(V value) {
+            if (index != null) {
+                values[index] = value;
+            } else {
+                insert(key, value);
+            }
+        }
+
+        public Optional<V> erase() {
+            if (index != null) {
+                var indexBefore = (index - vectorLength) & bucketMask;
+                var emptyBefore = matchEmpty(indexBefore);
+                var emptyAfter = matchEmpty(index);
+                byte ctrl;
+                var leadingNonEmpty = Long.numberOfLeadingZeros(emptyBefore.toLong()) - (Long.SIZE - vectorLength);
+                var trailingNonEmpty = Long.numberOfTrailingZeros(emptyAfter.toLong());
+                if (leadingNonEmpty + trailingNonEmpty >= vectorLength) {
+                    ctrl = DELETED_BYTE;
+                } else {
+                    growthLeft++;
+                    ctrl = EMPTY_BYTE;
+                }
+                setControl(index, ctrl);
+                items--;
+                var res = values[index];
+                values[index] = null;
+                keys[index] = null;
+                return Optional.of((V) res);
+            }
+            return Optional.empty();
+        }
+    }
+}
