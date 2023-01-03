@@ -12,6 +12,7 @@ import jdk.incubator.vector.VectorMask;
 import jdk.incubator.vector.VectorSpecies;
 import org.jetbrains.annotations.Nullable;
 
+import static jdk.incubator.vector.ByteVector.SPECIES_128;
 import static jdk.incubator.vector.VectorOperators.*;
 
 @SuppressWarnings("unchecked")
@@ -34,7 +35,15 @@ public class SwissTable<K, V, Vec extends VectorSpecies<Byte>> implements Serial
 
     private final Hasher<K> hasher;
 
-    public SwissTable(VectorSpecies<Byte> vectorSpecies, int capacity, Hasher<K> hasher) {
+    public SwissTable(VectorSpecies<Byte> vectorSpecies, Hasher<K> hasher) {
+        this(vectorSpecies, hasher, 0);
+    }
+
+    public SwissTable(Hasher<K> hasher) {
+        this(SPECIES_128, hasher, 0);
+    }
+
+    public SwissTable(VectorSpecies<Byte> vectorSpecies, Hasher<K> hasher, int capacity) {
         this.vectorSpecies = vectorSpecies;
         if (capacity == 0) {
             this.control = new byte[vectorSpecies.length()];
@@ -264,7 +273,7 @@ public class SwissTable<K, V, Vec extends VectorSpecies<Byte>> implements Serial
     }
 
     private SwissTable<K, V, Vec> prepareResize(int capacity) {
-        SwissTable<K, V, Vec> newTable = new SwissTable<>(vectorSpecies, capacity, hasher);
+        SwissTable<K, V, Vec> newTable = new SwissTable<>(vectorSpecies, hasher, capacity);
         newTable.growthLeft -= items;
         newTable.items += items;
         return newTable;
