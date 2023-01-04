@@ -64,7 +64,7 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
     }
 
     private ByteVector load(int offset) {
-        return vectorSpecies.fromArray(control, offset).reinterpretAsBytes();
+        return ByteVector.fromArray(vectorSpecies, control, offset);
     }
 
     private VectorMask<Byte> matchByte(int offset, byte target) {
