@@ -5,8 +5,6 @@ import fan.zhuyi.swisstable.WyHash;
 import org.openjdk.jmh.annotations.*;
 
 import java.util.HashMap;
-import java.util.Random;
-
 
 @State(Scope.Benchmark)
 @BenchmarkMode(Mode.Throughput)
