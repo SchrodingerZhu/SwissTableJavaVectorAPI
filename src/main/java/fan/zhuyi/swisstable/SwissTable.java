@@ -1,6 +1,6 @@
 package fan.zhuyi.swisstable;
 
-import jdk.incubator.vector.Vector;
+import jdk.incubator.vector.ByteVector;
 import jdk.incubator.vector.VectorMask;
 import jdk.incubator.vector.VectorSpecies;
 import org.jetbrains.annotations.NotNull;
@@ -24,7 +24,6 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
 
     private static final byte EMPTY_BYTE = (byte) 0b11111111;
     private static final byte DELETED_BYTE = (byte) 0b10000000;
-
     private final VectorSpecies<Byte> vectorSpecies;
     private final int vectorLength;
     private final Hasher<K> hasher;
@@ -66,8 +65,8 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
         Arrays.fill(this.control, EMPTY_BYTE);
     }
 
-    private Vector<Byte> load(int offset) {
-        return vectorSpecies.fromArray(control, offset);
+    private ByteVector load(int offset) {
+        return vectorSpecies.fromArray(control, offset).reinterpretAsBytes();
     }
 
     private VectorMask<Byte> matchByte(int offset, byte target) {
@@ -87,9 +86,9 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
     }
 
     private void convertSpecialToEmptyAndFullToDeleted(int offset) {
-        var maskedVector = load(offset).compare(LT, 0).toVector();
+        var maskedVector = load(offset).compare(LT, 0).toVector().reinterpretAsBytes();
         var converted = maskedVector.lanewise(OR, (byte) 0x80);
-        converted.intoMemorySegment(MemorySegment.ofArray(control), offset, ByteOrder.nativeOrder());
+        converted.intoArray(control, offset);
     }
 
     @NotNull
@@ -255,9 +254,10 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
         ProbeSequence seq = probeSequence(hash);
         while (true) {
             var position = seq.moveNext();
-            var mask = new MaskIterator(matchByte(position, h2));
-            while (mask.hasNext()) {
-                var bit = mask.next();
+            var mask = matchByte(position, h2).toLong();
+            while (MaskIterator.hasNext(mask)) {
+                var bit = MaskIterator.getNext(mask);
+                mask = MaskIterator.moveNext(mask);
                 var index = (position + bit) & bucketMask;
                 if (key.equals(keys[index])) return index;
             }
@@ -396,20 +396,15 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
     }
 
     private static class MaskIterator {
-        long data;
-
-        public MaskIterator(VectorMask<Byte> mask) {
-            this.data = mask.toLong();
-        }
-
-        public boolean hasNext() {
+        public static boolean hasNext(long data) {
             return data != 0;
         }
 
-        public int next() {
-            var result = Long.numberOfTrailingZeros(data);
-            data = data & (data - 1);
-            return result;
+        public static int getNext(long data) {
+            return Long.numberOfTrailingZeros(data);
+        }
+        public static long moveNext(long data) {
+            return data & (data - 1);
         }
     }
 
@@ -493,24 +488,26 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
 
     public final class TableIterator implements Iterator<Entry> {
 
-        MaskIterator currentIterator;
+        long currentIterator;
         int offset;
 
         int remainingItems;
 
         private TableIterator() {
-            this.currentIterator = new MaskIterator(matchFull(0));
+            this.currentIterator = matchFull(0).toLong();
             this.offset = 0;
             this.remainingItems = items;
         }
 
         private int moveNextUnchecked() {
             while (true) {
-                if (currentIterator.hasNext()) {
-                    return offset + currentIterator.next();
+                if (MaskIterator.hasNext(currentIterator)) {
+                    var result = offset + MaskIterator.getNext(currentIterator);
+                    currentIterator = MaskIterator.moveNext(currentIterator);
+                    return result;
                 }
                 var nextOffset = offset + vectorLength;
-                currentIterator.data = matchFull(nextOffset).toLong();
+                currentIterator = matchFull(nextOffset).toLong();
                 offset = nextOffset;
             }
         }
