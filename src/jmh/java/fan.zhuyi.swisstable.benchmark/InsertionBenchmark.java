@@ -9,7 +9,7 @@ import java.util.Random;
 
 
 @State(Scope.Benchmark)
-@BenchmarkMode(Mode.AverageTime)
+@BenchmarkMode(Mode.Throughput)
 @Fork(value = 1)
 @Warmup(iterations = 5, time = 5)
 public class InsertionBenchmark extends BenchmarkBase {
