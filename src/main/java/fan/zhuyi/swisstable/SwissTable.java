@@ -417,7 +417,7 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
 
         public int moveNext() {
             var position = this.position;
-            stride += vectorSpecies.length();
+            stride += vectorLength;
             position += stride;
             position &= bucketMask;
             return position;
