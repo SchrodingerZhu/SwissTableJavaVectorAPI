@@ -22,8 +22,8 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
 
     private static final byte EMPTY_BYTE = (byte) 0b11111111;
     private static final byte DELETED_BYTE = (byte) 0b10000000;
-    private final VectorSpecies<Byte> vectorSpecies;
-    private final int vectorLength;
+    private static final VectorSpecies<Byte> VECTOR_SPECIES = SPECIES_128;
+    private static final int VECTOR_LENGTH = VECTOR_SPECIES.length();
     private final Hasher<K> hasher;
     private byte[] control;
     private Object[] keys;
@@ -32,50 +32,44 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
     private int items;
     private int growthLeft;
 
-    public SwissTable(VectorSpecies<Byte> vectorSpecies, Hasher<K> hasher) {
-        this(vectorSpecies, hasher, 0);
-    }
-
     public SwissTable(Hasher<K> hasher) {
-        this(SPECIES_128, hasher, 0);
+        this(hasher, 0);
     }
 
-    public SwissTable(VectorSpecies<Byte> vectorSpecies, Hasher<K> hasher, int capacity) {
-        this.vectorSpecies = vectorSpecies;
+    public SwissTable(Hasher<K> hasher, int capacity) {
         if (capacity == 0) {
-            this.control = new byte[vectorSpecies.length()];
+            this.control = new byte[VECTOR_LENGTH];
             this.keys = null;
             this.values = null;
             this.bucketMask = 0;
             this.growthLeft = 0;
         } else {
             var buckets = Util.capacityToBuckets(capacity);
-            this.control = new byte[vectorSpecies.length() + buckets];
+            this.control = new byte[VECTOR_LENGTH + buckets];
             this.keys = new Object[buckets];
             this.values = new Object[buckets];
             this.bucketMask = buckets - 1;
             this.growthLeft = Util.bucketMaskToCapacity(this.bucketMask);
         }
-        this.vectorLength = this.vectorSpecies.length();
         this.items = 0;
         this.hasher = hasher;
         Arrays.fill(this.control, EMPTY_BYTE);
     }
 
     private ByteVector load(int offset) {
-        return ByteVector.fromArray(vectorSpecies, control, offset);
+        return ByteVector.fromArray(VECTOR_SPECIES, control, offset);
     }
 
     private VectorMask<Byte> matchByte(int offset, byte target) {
-        return load(offset).compare(EQ, target);
+        return load(offset).eq(target);
     }
 
     private VectorMask<Byte> matchEmpty(int offset) {
-        return load(offset).compare(EQ, EMPTY_BYTE);
+        return load(offset).eq(EMPTY_BYTE);
     }
 
     private VectorMask<Byte> matchEmptyOrDeleted(int offset) {
-        return load(offset).compare(LT, 0);
+        return load(offset).lt((byte)0);
     }
 
     private VectorMask<Byte> matchFull(int offset) {
@@ -83,8 +77,8 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
     }
 
     private void convertSpecialToEmptyAndFullToDeleted(int offset) {
-        var maskedVector = load(offset).compare(LT, 0).toVector().reinterpretAsBytes();
-        var converted = maskedVector.lanewise(OR, (byte) 0x80);
+        var maskedVector = load(offset).lt((byte)0).toVector().reinterpretAsBytes();
+        var converted = maskedVector.or((byte) 0x80);
         converted.intoArray(control, offset);
     }
 
@@ -99,7 +93,7 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
     }
 
     private void setControl(int index, byte value) {
-        if (index < vectorLength) {
+        if (index < VECTOR_LENGTH) {
             int mirrorIndex = bucketMask + 1 + index;
             control[mirrorIndex] = value;
         }
@@ -120,7 +114,7 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
                 var candidate = (position + mask.firstTrue()) & bucketMask;
                 return properInsertionSlot(candidate);
             }
-            stride += vectorLength;
+            stride += VECTOR_LENGTH;
             position = (position + stride) & bucketMask;
         }
     }
@@ -136,15 +130,15 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
     }
 
     private void prepareRehashInPlace() {
-        for (int i = 0; i < numOfBuckets(); i += vectorLength) {
+        for (int i = 0; i < numOfBuckets(); i += VECTOR_LENGTH) {
             convertSpecialToEmptyAndFullToDeleted(i);
         }
-        if (numOfBuckets() < vectorLength) {
+        if (numOfBuckets() < VECTOR_LENGTH) {
             for (int i = 0; i < numOfBuckets(); ++i) {
-                control[vectorLength + i] = control[i];
+                control[VECTOR_LENGTH + i] = control[i];
             }
         } else {
-            for (int i = 0; i < vectorLength; ++i) {
+            for (int i = 0; i < VECTOR_LENGTH; ++i) {
                 control[numOfBuckets() + i] = control[i];
             }
         }
@@ -152,8 +146,8 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
 
     private boolean isInTheSameGroup(int index, int new_index, long hash) {
         var probe_position = Util.h1(hash) & bucketMask;
-        int x = ((index - probe_position) & bucketMask) / vectorLength;
-        int y = ((new_index - probe_position) & bucketMask) / vectorLength;
+        int x = ((index - probe_position) & bucketMask) / VECTOR_LENGTH;
+        int y = ((new_index - probe_position) & bucketMask) / VECTOR_LENGTH;
         return x == y;
     }
 
@@ -195,7 +189,7 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
     }
 
     private SwissTable<K, V> prepareResize(int capacity) {
-        SwissTable<K, V> newTable = new SwissTable<>(vectorSpecies, hasher, capacity);
+        SwissTable<K, V> newTable = new SwissTable<>(hasher, capacity);
         newTable.growthLeft -= items;
         newTable.items += items;
         return newTable;
@@ -259,7 +253,7 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
                 return -1;
             }
 
-            stride += vectorLength;
+            stride += VECTOR_LENGTH;
             position = (position + stride) & bucketMask;
         }
     }
@@ -441,13 +435,13 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
 
         public V erase() throws NoSuchElementException {
             if (index >= 0) {
-                var indexBefore = (index - vectorLength) & bucketMask;
+                var indexBefore = (index - VECTOR_LENGTH) & bucketMask;
                 var emptyBefore = matchEmpty(indexBefore);
                 var emptyAfter = matchEmpty(index);
                 byte ctrl;
-                var leadingNonEmpty = Long.numberOfLeadingZeros(emptyBefore.toLong()) - (Long.SIZE - vectorLength);
+                var leadingNonEmpty = Long.numberOfLeadingZeros(emptyBefore.toLong()) - (Long.SIZE - VECTOR_LENGTH);
                 var trailingNonEmpty = Long.numberOfTrailingZeros(emptyAfter.toLong());
-                if (leadingNonEmpty + trailingNonEmpty >= vectorLength) {
+                if (leadingNonEmpty + trailingNonEmpty >= VECTOR_LENGTH) {
                     ctrl = DELETED_BYTE;
                 } else {
                     growthLeft++;
@@ -484,7 +478,7 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
                     currentIterator = MaskIterator.moveNext(currentIterator);
                     return result;
                 }
-                var nextOffset = offset + vectorLength;
+                var nextOffset = offset + VECTOR_LENGTH;
                 currentIterator = matchFull(nextOffset).toLong();
                 offset = nextOffset;
             }
