@@ -15,7 +15,7 @@ public class SwissTableTest {
     private static void testSequential(Hasher<Integer> hasher, int firstRound, int secondRound) {
         SwissTable<Integer, Integer> table = new SwissTable<>(hasher);
         for (int i = 0; i < firstRound; ++i) {
-            table.insert(i , i);
+            table.insert(i, i);
         }
         for (int i = 0; i < firstRound; ++i) {
             var entry = table.findEntry(i);
@@ -36,7 +36,7 @@ public class SwissTableTest {
         }
 
         for (int i = secondRound; i >= 0; --i) {
-            table.insert(i , i);
+            table.insert(i, i);
         }
         for (int i = 0; i <= secondRound; ++i) {
             var entry = table.findEntry(i);

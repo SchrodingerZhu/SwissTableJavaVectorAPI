@@ -13,7 +13,7 @@ import java.util.NoSuchElementException;
 import java.util.Optional;
 
 import static jdk.incubator.vector.ByteVector.SPECIES_128;
-import static jdk.incubator.vector.VectorOperators.*;
+import static jdk.incubator.vector.VectorOperators.GE;
 
 @SuppressWarnings("unchecked")
 public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>.Entry> {
@@ -56,28 +56,27 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
         Arrays.fill(this.control, EMPTY_BYTE);
     }
 
+    private static final ByteVector EMPTY_VECTOR = ByteVector.broadcast(VECTOR_SPECIES, EMPTY_BYTE);
+    private static final ByteVector ZERO_VECTOR = ByteVector.broadcast(VECTOR_SPECIES, EMPTY_BYTE);
+
     private ByteVector load(int offset) {
         return ByteVector.fromArray(VECTOR_SPECIES, control, offset);
     }
 
-    private VectorMask<Byte> matchByte(int offset, byte target) {
-        return load(offset).eq(target);
-    }
-
     private VectorMask<Byte> matchEmpty(int offset) {
-        return load(offset).eq(EMPTY_BYTE);
+        return load(offset).eq(EMPTY_VECTOR);
     }
 
     private VectorMask<Byte> matchEmptyOrDeleted(int offset) {
-        return load(offset).lt((byte)0);
+        return load(offset).lt(ZERO_VECTOR);
     }
 
     private VectorMask<Byte> matchFull(int offset) {
-        return load(offset).compare(GE, 0);
+        return load(offset).compare(GE, ZERO_VECTOR);
     }
 
     private void convertSpecialToEmptyAndFullToDeleted(int offset) {
-        var maskedVector = load(offset).lt((byte)0).toVector().reinterpretAsBytes();
+        var maskedVector = load(offset).lt((byte) 0).toVector().reinterpretAsBytes();
         var converted = maskedVector.or((byte) 0x80);
         converted.intoArray(control, offset);
     }
@@ -237,11 +236,13 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
     }
 
     private int findWithHash(long hash, K key) {
-        byte h2 = Util.h2(hash);
-        int position = Util.h1(hash) & bucketMask;
+        final byte h2 = Util.h2(hash); //highest 7 bits
+        final ByteVector target = ByteVector.broadcast(VECTOR_SPECIES, h2);
+        int position = Util.h1(hash) & bucketMask; // h1 is just long to int
         int stride = 0;
         while (true) {
-            var mask = matchByte(position, h2).toLong();
+            final ByteVector vector = load(position);
+            var mask = vector.eq(target).toLong(); // match byte is to load a vector of byte and do equality comparison
             while (MaskIterator.hasNext(mask)) {
                 var bit = MaskIterator.getNext(mask);
                 mask = MaskIterator.moveNext(mask);
@@ -249,7 +250,7 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
                 if (key.equals(keys[index])) return index;
             }
 
-            if (matchEmpty(position).anyTrue()) {
+            if (vector.eq(EMPTY_VECTOR).anyTrue()) {
                 return -1;
             }
 
@@ -393,6 +394,7 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
         public static int getNext(long data) {
             return Long.numberOfTrailingZeros(data);
         }
+
         public static long moveNext(long data) {
             return data & (data - 1);
         }
