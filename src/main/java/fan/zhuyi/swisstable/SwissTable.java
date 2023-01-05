@@ -25,7 +25,6 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
     private final VectorSpecies<Byte> vectorSpecies;
     private final int vectorLength;
     private final Hasher<K> hasher;
-    private final ProbeSequence REUSE = new ProbeSequence(0, 0);
     private byte[] control;
     private Object[] keys;
     private Object[] values;
@@ -107,26 +106,22 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
         control[index] = value;
     }
 
-    private ProbeSequence probeSequence(long hash) {
-        REUSE.position = Util.h1(hash) & bucketMask;
-        REUSE.stride = 0;
-        return REUSE;
-    }
-
     private int properInsertionSlot(int index) {
         if (Util.isFull(control[index])) return matchEmptyOrDeleted(0).firstTrue();
         return index;
     }
 
     private int findInsertSlot(long hash) {
-        var seq = probeSequence(hash);
+        int position = Util.h1(hash) & bucketMask;
+        int stride = 0;
         while (true) {
-            var position = seq.moveNext();
             var mask = matchEmptyOrDeleted(position);
             if (mask.anyTrue()) {
                 var candidate = (position + mask.firstTrue()) & bucketMask;
                 return properInsertionSlot(candidate);
             }
+            stride += vectorLength;
+            position = (position + stride) & bucketMask;
         }
     }
 
@@ -249,9 +244,9 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
 
     private int findWithHash(long hash, K key) {
         byte h2 = Util.h2(hash);
-        ProbeSequence seq = probeSequence(hash);
+        int position = Util.h1(hash) & bucketMask;
+        int stride = 0;
         while (true) {
-            var position = seq.moveNext();
             var mask = matchByte(position, h2).toLong();
             while (MaskIterator.hasNext(mask)) {
                 var bit = MaskIterator.getNext(mask);
@@ -263,6 +258,9 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
             if (matchEmpty(position).anyTrue()) {
                 return -1;
             }
+
+            stride += vectorLength;
+            position = (position + stride) & bucketMask;
         }
     }
 
@@ -403,24 +401,6 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
         }
         public static long moveNext(long data) {
             return data & (data - 1);
-        }
-    }
-
-    private class ProbeSequence {
-        int position;
-        int stride;
-
-        public ProbeSequence(int position, int stride) {
-            this.position = position;
-            this.stride = stride;
-        }
-
-        public int moveNext() {
-            var position = this.position;
-            stride += vectorLength;
-            position += stride;
-            position &= bucketMask;
-            return position;
         }
     }
 
