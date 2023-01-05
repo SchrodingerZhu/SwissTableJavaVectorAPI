@@ -57,7 +57,7 @@ public class SwissTable<K, V> implements Serializable, Iterable<SwissTable<K, V>
     }
 
     private static final ByteVector EMPTY_VECTOR = ByteVector.broadcast(VECTOR_SPECIES, EMPTY_BYTE);
-    private static final ByteVector ZERO_VECTOR = ByteVector.broadcast(VECTOR_SPECIES, EMPTY_BYTE);
+    private static final ByteVector ZERO_VECTOR = ByteVector.broadcast(VECTOR_SPECIES, 0);
 
     private ByteVector load(int offset) {
         return ByteVector.fromArray(VECTOR_SPECIES, control, offset);
