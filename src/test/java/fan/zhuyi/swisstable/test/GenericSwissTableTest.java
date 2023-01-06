@@ -1,7 +1,7 @@
 package fan.zhuyi.swisstable.test;
 
+import fan.zhuyi.swisstable.GenericSwissTable;
 import fan.zhuyi.swisstable.Hasher;
-import fan.zhuyi.swisstable.SwissTable;
 import fan.zhuyi.swisstable.WyHash;
 import org.junit.jupiter.api.Test;
 
@@ -11,9 +11,9 @@ import java.util.Random;
 import static org.junit.jupiter.api.Assertions.*;
 
 
-public class SwissTableTest {
+public class GenericSwissTableTest {
     private static void testSequential(Hasher<Integer> hasher, int firstRound, int secondRound) {
-        SwissTable<Integer, Integer> table = new SwissTable<>(hasher);
+        GenericSwissTable<Integer, Integer> table = new GenericSwissTable<>(hasher);
         for (int i = 0; i < firstRound; ++i) {
             table.insert(i, i);
         }
@@ -63,7 +63,7 @@ public class SwissTableTest {
     @Test
     public void mutualIteratorTest() {
         var gen = new Random();
-        SwissTable<Integer, Integer> table = new SwissTable<>(WyHash.DEFAULT.asIntegerHasher());
+        GenericSwissTable<Integer, Integer> table = new GenericSwissTable<>(WyHash.DEFAULT.asIntegerHasher());
         HashMap<Integer, Integer> hashMap = new HashMap<>();
         for (int i = 0; i < 10000; ++i) {
             var y = gen.nextInt();
