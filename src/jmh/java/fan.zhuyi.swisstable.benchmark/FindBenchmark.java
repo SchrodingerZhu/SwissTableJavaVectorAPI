@@ -12,23 +12,28 @@ import java.util.HashMap;
 @Fork(value = 1)
 @Warmup(iterations = 5, time = 5)
 public class FindBenchmark extends BenchmarkBase {
-    SwissTable<String, Long> stringLongSwissTable;
+    SwissTable<StringWithHash, Long> stringLongSwissTable;
     SwissTable<Long, Long> longLongSwissTable;
 
-    GenericSwissTable<String, Long> stringLongGenericSwissTable;
+    GenericSwissTable<StringWithHash, Long> stringLongGenericSwissTable;
     GenericSwissTable<Long, Long> longLongGenericSwissTable;
-    HashMap<String, Long> stringLongHashMap;
+    HashMap<StringWithHash, Long> stringLongHashMap;
     HashMap<Long, Long> longLongHashMap;
+    StringWithHash[] missingSequence;
 
     @Setup
     public void initMaps() {
-        stringLongSwissTable = new SwissTable<>(WyHash.DEFAULT.asStringHasher());
+        stringLongSwissTable = new SwissTable<>(StringWithHash::hash);
         longLongSwissTable = new SwissTable<>(x -> x);
-        stringLongGenericSwissTable = new GenericSwissTable<>(WyHash.DEFAULT.asStringHasher());
+        stringLongGenericSwissTable = new GenericSwissTable<>(StringWithHash::hash);
         longLongGenericSwissTable = new GenericSwissTable<>(x -> x);
         stringLongHashMap = new HashMap<>();
         longLongHashMap = new HashMap<>();
+        missingSequence = new StringWithHash[keys.length];
+        var hasher = WyHash.DEFAULT.asStringHasher();
         for (int i = 0; i < keys.length; ++i) {
+            var missingKey = Long.toString(values[i]);
+            missingSequence[i] = new StringWithHash(missingKey, hasher.hash(missingKey));
             stringLongGenericSwissTable.insert(keys[i], values[i]);
             longLongGenericSwissTable.insert(values[i], values[i]);
             stringLongSwissTable.insert(keys[i], values[i]);
@@ -37,9 +42,10 @@ public class FindBenchmark extends BenchmarkBase {
             longLongHashMap.put(values[i], values[i]);
         }
     }
+
     @Benchmark
     public void genericSwissTableFindExistingString() {
-        for (String key : keys) {
+        for (var key : keys) {
             stringLongGenericSwissTable.find(key);
         }
     }
@@ -53,7 +59,7 @@ public class FindBenchmark extends BenchmarkBase {
 
     @Benchmark
     public void swissTableFindExistingString() {
-        for (String key : keys) {
+        for (var key : keys) {
             stringLongSwissTable.find(key);
         }
     }
@@ -67,7 +73,7 @@ public class FindBenchmark extends BenchmarkBase {
 
     @Benchmark
     public void hashTableFindExistingString() {
-        for (String key : keys) {
+        for (var key : keys) {
             stringLongHashMap.get(key);
         }
     }
@@ -81,8 +87,8 @@ public class FindBenchmark extends BenchmarkBase {
 
     @Benchmark
     public void genericSwissTableFindMissingString() {
-        for (long key : values) {
-            stringLongGenericSwissTable.find(Long.toString(key));
+        for (var key : missingSequence) {
+            stringLongGenericSwissTable.find(key);
         }
     }
 
@@ -95,8 +101,8 @@ public class FindBenchmark extends BenchmarkBase {
 
     @Benchmark
     public void swissTableFindMissingString() {
-        for (long key : values) {
-            stringLongSwissTable.find(Long.toString(key));
+        for (var key : missingSequence) {
+            stringLongSwissTable.find(key);
         }
     }
 
@@ -109,8 +115,8 @@ public class FindBenchmark extends BenchmarkBase {
 
     @Benchmark
     public void hashTableFindMissingString() {
-        for (long key : values) {
-            stringLongHashMap.get(Long.toString(key));
+        for (var key : missingSequence) {
+            stringLongHashMap.get(key);
         }
     }
 

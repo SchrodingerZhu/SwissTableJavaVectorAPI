@@ -1,5 +1,6 @@
 package fan.zhuyi.swisstable.benchmark;
 
+import fan.zhuyi.swisstable.GenericSwissTable;
 import fan.zhuyi.swisstable.SwissTable;
 import fan.zhuyi.swisstable.WyHash;
 import org.openjdk.jmh.annotations.*;
@@ -12,8 +13,16 @@ import java.util.HashMap;
 @Warmup(iterations = 5, time = 5)
 public class InsertionBenchmark extends BenchmarkBase {
     @Benchmark
+    public void genericSwissTableStringInsertion() {
+        var table = new GenericSwissTable<StringWithHash, Long>(StringWithHash::hash);
+        for (int i = 0; i < keys.length; i++) {
+            table.insert(keys[i], values[i]);
+        }
+    }
+
+    @Benchmark
     public void swissTableStringInsertion() {
-        var table = new SwissTable<String, Long>(WyHash.DEFAULT.asStringHasher());
+        var table = new SwissTable<StringWithHash, Long>(StringWithHash::hash);
         for (int i = 0; i < keys.length; i++) {
             table.insert(keys[i], values[i]);
         }
@@ -21,9 +30,17 @@ public class InsertionBenchmark extends BenchmarkBase {
 
     @Benchmark
     public void hashMapStringInsertion() {
-        var table = new HashMap<String, Long>();
+        var table = new HashMap<StringWithHash, Long>();
         for (int i = 0; i < keys.length; i++) {
             table.put(keys[i], values[i]);
+        }
+    }
+
+    @Benchmark
+    public void genericSwissTableLongInsertion() {
+        var table = new GenericSwissTable<Long, Long>(x -> x);
+        for (int i = 0; i < keys.length; i++) {
+            table.insert(values[i], values[i]);
         }
     }
 
